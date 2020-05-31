@@ -9,6 +9,10 @@
 //		// do something with e.Value
 //	}
 //
+/* 值得学习的地方：
+1、双向链表使用了一个哨兵以简化边界情况
+2、一个疑问
+ */
 package list
 
 // Element is an element of a linked list.
@@ -137,7 +141,7 @@ func (l *List) move(e, at *Element) *Element {
 // It returns the element value e.Value.
 // The element must not be nil.
 func (l *List) Remove(e *Element) interface{} {
-	if e.list == l {
+	if e.list == l { //e已经在列表中了
 		// if e.list == l, l must have been initialized when e was inserted
 		// in l or l == nil (e is a zero Element) and l.remove will crash
 		l.remove(e)
@@ -147,7 +151,7 @@ func (l *List) Remove(e *Element) interface{} {
 
 // PushFront inserts a new element e with value v at the front of list l and returns e.
 func (l *List) PushFront(v interface{}) *Element {
-	l.lazyInit()
+	l.lazyInit() //? 好像没必要，new已经调用过Init了
 	return l.insertValue(v, &l.root)
 }
 
