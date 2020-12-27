@@ -60,18 +60,18 @@ import (
 //
 // Context's methods may be called by multiple goroutines simultaneously.
 type Context interface {
-	// Deadline returns the time when work done on behalf of this context
+	// Deadline returns the time when work done on behalf of(代表) this context
 	// should be canceled. Deadline returns ok==false when no deadline is
 	// set. Successive calls to Deadline return the same results.
 	Deadline() (deadline time.Time, ok bool)
 
 	// Done returns a channel that's closed when work done on behalf of this
 	// context should be canceled. Done may return nil if this context can
-	// never be canceled. Successive calls to Done return the same value.
+	// never be canceled. Successive(连续) calls to Done return the same value.
 	// The close of the Done channel may happen asynchronously,
 	// after the cancel function returns.
 	//
-	// WithCancel arranges for Done to be closed when cancel is called;
+	// WithCancel arranges(安排) for Done to be closed when cancel is called;
 	// WithDeadline arranges for Done to be closed when the deadline
 	// expires; WithTimeout arranges for Done to be closed when the timeout
 	// elapses.
@@ -243,6 +243,7 @@ func newCancelCtx(parent Context) cancelCtx {
 // goroutines counts the number of goroutines ever created; for testing.
 var goroutines int32
 
+//设置父->子的联动取消关系
 // propagateCancel arranges for child to be canceled when parent is.
 func propagateCancel(parent Context, child canceler) {
 	done := parent.Done()
@@ -258,7 +259,7 @@ func propagateCancel(parent Context, child canceler) {
 	default:
 	}
 
-	if p, ok := parentCancelCtx(parent); ok {
+	if p, ok := parentCancelCtx(parent); ok {//拿parent底层的cancelCtx
 		p.mu.Lock()
 		if p.err != nil {
 			// parent has already been canceled
@@ -267,16 +268,16 @@ func propagateCancel(parent Context, child canceler) {
 			if p.children == nil {
 				p.children = make(map[canceler]struct{})
 			}
-			p.children[child] = struct{}{}
+			p.children[child] = struct{}{} //让父cancelCtx以找到子cancelCtx,当父取消时，会遍历取消子
 		}
 		p.mu.Unlock()
-	} else {
+	} else {//不存在cancelCtx,外部实现了自定义的带有cancle功能的Context,需要监听，当其取消时child也要取消
 		atomic.AddInt32(&goroutines, +1)
 		go func() {
 			select {
-			case <-parent.Done():
+			case <-parent.Done(): //这里不会为nil,否则之前就return了,即使为nil也会阻塞
 				child.cancel(false, parent.Err())
-			case <-child.Done():
+			case <-child.Done()://子如果取消了，就不需要关心父是否取消了
 			}
 		}()
 	}
@@ -290,12 +291,16 @@ var cancelCtxKey int
 // the innermost enclosing *cancelCtx and then checking whether
 // parent.Done() matches that *cancelCtx. (If not, the *cancelCtx
 // has been wrapped in a custom implementation providing a
-// different done channel, in which case we should not bypass it.)
+// different done channel, in which case we should not bypass(绕过) it.)
 func parentCancelCtx(parent Context) (*cancelCtx, bool) {
+	//注意：由于标准库实现了Context接口的对象中，只有cancelCtx对象的Done()重写了，所以
+	//如果外部没有自定义的实现，parent.Done()获取到的是cancelCtx的done。否则是自定义的done
+	//这会导致与后面的拿到的cancelCtx的done不匹配
 	done := parent.Done()
 	if done == closedchan || done == nil {
 		return nil, false
 	}
+	//获取cancelCtx对象，emptyCtx->valCtx(val可能嵌套0到多个)->cancelCtx->childCancel(children map),拿到的是cancelCtx
 	p, ok := parent.Value(&cancelCtxKey).(*cancelCtx)
 	if !ok {
 		return nil, false
@@ -356,7 +361,7 @@ func (c *cancelCtx) Value(key interface{}) interface{} {
 
 func (c *cancelCtx) Done() <-chan struct{} {
 	c.mu.Lock()
-	if c.done == nil {
+	if c.done == nil { //lazily init
 		c.done = make(chan struct{})
 	}
 	d := c.done
@@ -398,7 +403,7 @@ func (c *cancelCtx) cancel(removeFromParent bool, err error) {
 		return // already canceled
 	}
 	c.err = err
-	if c.done == nil {
+	if c.done == nil {//因为done是Done()调用lazy init的，所以可能nil
 		c.done = closedchan
 	} else {
 		close(c.done)
@@ -522,6 +527,7 @@ func WithValue(parent Context, key, val interface{}) Context {
 
 // A valueCtx carries a key-value pair. It implements Value for that key and
 // delegates all other calls to the embedded Context.
+//有意思的点，首先不是持有一个map；其次 Value的实现,通过Context层层嵌套调用实现了类型map的效果
 type valueCtx struct {
 	Context
 	key, val interface{}
